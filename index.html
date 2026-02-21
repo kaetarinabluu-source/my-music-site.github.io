@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>My Favorite Albums - Admin</title>
+<style>
+body{
+    margin:0;
+    font-family:"Helvetica Neue", Helvetica, Arial, sans-serif;
+    color:white;
+    text-align:center;
+    background-image:url("background.jpg");
+    background-size:cover;
+    background-position:center;
+    background-repeat:no-repeat;
+    background-attachment:fixed;
+}
+.overlay{
+    position:fixed;
+    top:0; left:0;
+    width:100%; height:100%;
+    background:rgba(0,0,0,0.5);
+    z-index:-1;
+}
+h1{ margin-top:50px; }
+
+/* Админ-панель */
+#adminPanel{
+    display:none;
+    background:rgba(0,0,0,0.85);
+    padding:15px;
+    border-radius:15px;
+    margin:20px auto;
+    width:90%;
+    max-width:900px;
+    text-align:left;
+}
+#adminPanel input, #adminPanel select{
+    margin:5px;
+    padding:5px;
+    border-radius:5px;
+    border:none;
+}
+#adminPanel button{
+    padding:5px 10px;
+    border-radius:5px;
+    border:none;
+    cursor:pointer;
+    font-weight:bold;
+}
+#adminPanel button:hover{ background: #444; color:#fff; }
+
+/* Карточки */
+.album-container{
+    display:flex;
+    justify-content:center;
+    gap:20px;
+    flex-wrap:wrap;
+    margin-top:30px;
+}
+.album{
+    cursor:pointer;
+    transition:transform 0.3s, box-shadow 0.3s;
+    width:200px;
+    text-align:center;
+    border-radius:10px;
+}
+.album:hover{
+    transform:scale(1.05);
+}
+.album img{
+    width:100%;
+    border-radius:15px;
+}
+.artist{ font-weight:1000; font-size:18px; margin-top:10px; transition:background 0.3s; }
+.album-title{ font-size:14px; opacity:0.85; margin-top:-10px; transition:background 0.3s; }
+
+/* Подсветка текста при наведении на карточку (без полосок) */
+.album:hover .artist,
+.album:hover .album-title {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 5px;
+    transition: all 0.2s ease;
+}
+
+/* Модальное окно */
+.modal{
+    display:none;
+    position:fixed;
+    top:0; left:0;
+    width:100%; height:100%;
+    background:rgba(0,0,0,0.7);
+    justify-content:center;
+    align-items:center;
+    opacity:0;
+    transition:opacity 0.3s ease;
+}
+.modal.show{ opacity:1; }
+.modal-content{
+    background:#1e1e1e;
+    padding:20px;
+    border-radius:20px;
+    width:80%;
+    max-width:800px;
+    display:flex;
+    gap:20px;
+    position:relative;
+    transform:scale(0.85);
+    transition:transform 0.3s ease;
+    max-height:80vh;
+    overflow:hidden;
+}
+.modal.show .modal-content{ transform:scale(1); }
+.modal-content img{
+    width:250px;
+    height:250px;
+    border-radius:15px;
+    flex-shrink:0;
+    object-fit:cover;
+}
+.songs{
+    text-align:left;
+    flex:1;
+    overflow-y:auto;
+    max-height:250px;
+    padding-right:10px;
+}
+.songs p{ margin:8px 0; }
+.songs input.ratingInput{
+    width:60px;
+    text-align:center;
+    font-size:14px;
+    border:none;
+    border-radius:5px;
+    padding:2px;
+}
+.songs span.ratingDisplay{
+    display:inline-block;
+    width:60px;
+    text-align:center;
+    border-radius:5px;
+    padding:2px;
+}
+
+.close{
+    position:absolute;
+    top:10px;
+    right:15px;
+    font-size:25px;
+    cursor:pointer;
+}
+
+/* Dragging */
+.dragging{ opacity:0.5; }
+</style>
+</head>
+<body>
+
+<h1>My Favorite Albums</h1>
+
+<div id="adminPanel">
+<h2>Управление альбомами</h2>
+<input type="text" id="artistInput" placeholder="Артист">
+<input type="text" id="albumInput" placeholder="Альбом">
+<input type="file" id="coverFileInput" accept="image/*">
+<input type="text" id="tracksInput" placeholder="Треки через запятую">
+<input type="number" id="ratingInput" placeholder="Твоя оценка" min="0" max="10" step="0.1">
+<button onclick="addAlbum()">Добавить</button>
+
+<h3>Список альбомов</h3>
+<div id="albumList"></div>
+</div>
+
+<div class="album-container" id="albumContainer"></div>
+
+<div class="modal" id="albumModal">
+<div class="modal-content">
+<div class="close" onclick="closeModal()">✖</div>
+<img id="albumImage">
+<div class="songs" id="albumSongs"></div>
+</div>
+</div>
+
+<script>
+let albums = JSON.parse(localStorage.getItem("albums")) || {};
+let savedRatings = JSON.parse(localStorage.getItem("ratings")) || {};
+let isAdmin = false;
+
+document.addEventListener("keydown", e=>{
+    if(e.shiftKey && e.key==="Tab"){
+        e.preventDefault();
+        const panel = document.getElementById("adminPanel");
+        panel.style.display = panel.style.display==="none" ? "block" : "none";
+        isAdmin = panel.style.display==="block";
+        renderAdmin();
+        renderAlbums();
+    }
+});
+
+function addAlbum(){
+    const artist = document.getElementById("artistInput").value.trim();
+    const title = document.getElementById("albumInput").value.trim();
+    const file = document.getElementById("coverFileInput").files[0];
+    const tracks = document.getElementById("tracksInput").value.split(",").map(t=>t.trim()).filter(t=>t);
+    const rating = document.getElementById("ratingInput").value.trim();
+    if(!artist || !title || !file || tracks.length===0){ alert("Заполните все поля!"); return; }
+
+    const reader = new FileReader();
+    reader.onload = e=>{
+        const imgData = e.target.result;
+        const id = artist+"-"+title;
+        albums[id] = {img: imgData, title: artist+" – "+title, tracks: tracks};
+        if(rating){
+            tracks.forEach(track=>savedRatings[id+"-"+track]=rating);
+            localStorage.setItem("ratings", JSON.stringify(savedRatings));
+        }
+        localStorage.setItem("albums", JSON.stringify(albums));
+        renderAlbums();
+        renderAdmin();
+    }
+    reader.readAsDataURL(file);
+
+    document.getElementById("artistInput").value="";
+    document.getElementById("albumInput").value="";
+    document.getElementById("coverFileInput").value="";
+    document.getElementById("tracksInput").value="";
+    document.getElementById("ratingInput").value="";
+}
+
+function renderAlbums(){
+    const container = document.getElementById("albumContainer");
+    container.innerHTML="";
+    for(let id in albums){
+        const alb = albums[id];
+        const div = document.createElement("div");
+        div.className = "album";
+        div.draggable = true;
+        div.dataset.id = id;
+        div.innerHTML = `<img src="${alb.img}"><p class="artist">${alb.title.split(" – ")[0]}</p><p class="album-title">${alb.title.split(" – ")[1]}</p>`;
+        div.onclick = () => openAlbum(id);
+        addDragEvents(div);
+        container.appendChild(div);
+    }
+}
+
+function addDragEvents(elem){
+    elem.addEventListener("dragstart", e=>{
+        elem.classList.add("dragging");
+        e.dataTransfer.setData("text/plain", elem.dataset.id);
+    });
+    elem.addEventListener("dragend", e=>{
+        elem.classList.remove("dragging");
+        saveOrder();
+    });
+    elem.addEventListener("dragover", e=>{
+        e.preventDefault();
+        const dragging = document.querySelector(".dragging");
+        const container = elem.parentElement;
+        const after = getDragAfterElement(container, e.clientX);
+        if(!after) container.appendChild(dragging);
+        else container.insertBefore(dragging, after);
+    });
+}
+function getDragAfterElement(container, x){
+    const draggableElements = [...container.querySelectorAll(".album:not(.dragging)")];
+    return draggableElements.reduce((closest, child)=>{
+        const box = child.getBoundingClientRect();
+        const offset = x - box.left - box.width/2;
+        if(offset<0 && offset>closest.offset) return {offset: offset, element: child};
+        else return closest;
+    }, {offset:-Infinity}).element;
+}
+function saveOrder(){
+    const container = document.getElementById("albumContainer");
+    const newOrder = {};
+    [...container.children].forEach(div=>{
+        const id = div.dataset.id;
+        newOrder[id] = albums[id];
+    });
+    albums = newOrder;
+    localStorage.setItem("albums", JSON.stringify(albums));
+    renderAdmin();
+}
+
+function renderAdmin(){
+    const list = document.getElementById("albumList");
+    list.innerHTML="";
+    for(let id in albums){
+        const alb = albums[id];
+        // Экранируем одинарные кавычки в id
+        const escapedId = id.replace(/'/g, "\\'");
+        const div = document.createElement("div");
+        div.innerHTML = `<b>${alb.title}</b>
+            <button onclick="editAlbum('${escapedId}'); event.stopPropagation();">Редактировать</button>
+            <button onclick="deleteAlbum('${escapedId}'); event.stopPropagation();">Удалить</button>`;
+        list.appendChild(div);
+    }
+}
+
+function deleteAlbum(id){
+    if(confirm("Удалить альбом?")){
+        // Удаляем также оценки этого альбома
+        for(let key in savedRatings){
+            if(key.startsWith(id+"-")) delete savedRatings[key];
+        }
+        localStorage.setItem("ratings", JSON.stringify(savedRatings));
+        delete albums[id];
+        localStorage.setItem("albums", JSON.stringify(albums));
+        renderAlbums();
+        renderAdmin();
+    }
+}
+
+function editAlbum(id){
+    const alb = albums[id];
+    const newArtist = prompt("Имя артиста:", alb.title.split(" – ")[0]);
+    if(!newArtist) return;
+    const newTitle = prompt("Название альбома:", alb.title.split(" – ")[1]);
+    if(!newTitle) return;
+    const tracksStr = prompt("Треки через запятую", alb.tracks.join(","));
+    const newTracks = tracksStr ? tracksStr.split(",").map(t=>t.trim()).filter(t=>t) : alb.tracks;
+    
+    // Сохраняем старый id и старый список треков
+    const oldId = id;
+    const oldTracks = alb.tracks;
+    
+    // Формируем новый id (может отличаться, если изменились артист или название)
+    const newId = newArtist + "-" + newTitle;
+    
+    // Если id изменился, нужно перенести оценки
+    if (oldId !== newId) {
+        // Создаём новый объект альбома с новым id
+        albums[newId] = {
+            img: alb.img,
+            title: newArtist + " – " + newTitle,
+            tracks: newTracks
+        };
+        // Переносим оценки: для каждого старого трека ищем соответствие в новом списке
+        // (простой вариант: копируем оценки только для треков с точно таким же названием)
+        oldTracks.forEach((track, index) => {
+            const oldKey = oldId + "-" + track;
+            if (savedRatings[oldKey] !== undefined) {
+                // Ищем такой же трек в новом списке
+                const matchingIndex = newTracks.findIndex(t => t === track);
+                if (matchingIndex !== -1) {
+                    const newKey = newId + "-" + newTracks[matchingIndex];
+                    savedRatings[newKey] = savedRatings[oldKey];
+                }
+                // Удаляем старый ключ, чтобы не мусорить
+                delete savedRatings[oldKey];
+            }
+        });
+        // Удаляем старый альбом
+        delete albums[oldId];
+    } else {
+        // id не изменился, просто обновляем поля
+        albums[id] = {
+            img: alb.img,
+            title: newArtist + " – " + newTitle,
+            tracks: newTracks
+        };
+        // Обновляем оценки: удаляем ключи для удалённых треков
+        const newTracksSet = new Set(newTracks);
+        for (let key in savedRatings) {
+            if (key.startsWith(id + "-")) {
+                const trackName = key.slice(id.length + 1);
+                if (!newTracksSet.has(trackName)) {
+                    delete savedRatings[key];
+                }
+            }
+        }
+    }
+    
+    localStorage.setItem("albums", JSON.stringify(albums));
+    localStorage.setItem("ratings", JSON.stringify(savedRatings));
+    renderAlbums();
+    renderAdmin();
+}
+
+function openAlbum(album){
+    const modal = document.getElementById("albumModal");
+    const image = document.getElementById("albumImage");
+    const songs = document.getElementById("albumSongs");
+    const albumData = albums[album];
+    image.src = albumData.img;
+    songs.innerHTML=`<h2>${albumData.title}</h2>`;
+    albumData.tracks.forEach(track=>{
+        const key = album+"-"+track;
+        const value = savedRatings[key]||"";
+        if(isAdmin){
+            // Экранируем key для использования в атрибуте oninput
+            const escapedKey = key.replace(/'/g, "\\'");
+            songs.innerHTML+=`<p>${track} ⭐<input class="ratingInput" type="number" min="0" max="10" step="0.1" value="${value}" oninput="saveRating('${escapedKey}',this)"></p>`;
+            setTimeout(()=>document.querySelectorAll(".songs input").forEach(i=>applyColor(i)),50);
+        } else {
+            songs.innerHTML+=`<p>${track} ⭐ <span class="ratingDisplay" style="${getRatingStyle(value)}">${value?value:"–"}</span></p>`;
+        }
+    });
+    modal.style.display="flex";
+    setTimeout(()=>modal.classList.add("show"),10);
+}
+
+function getRatingStyle(v){
+    v = parseFloat(v);
+    if(isNaN(v)) return "background:#444; padding:2px 5px; border-radius:4px;";
+    if(v>=10) return "background:linear-gradient(90deg,#ff0000,#ff7a00,#ffd500,#00ff87,#00cfff,#7a00ff,#ff00aa); padding:2px 5px; border-radius:4px;";
+    else if(v>=9) return "background:linear-gradient(90deg,#ff00cc,#ff4dd2); padding:2px 5px; border-radius:4px;";
+    else if(v>=8) return "background:linear-gradient(90deg,#7a5cff,#4da6ff); padding:2px 5px; border-radius:4px;";
+    else if(v>=7) return "background:linear-gradient(90deg,#3aa0ff,#2dd4bf); padding:2px 5px; border-radius:4px;";
+    else if(v>=6) return "background:linear-gradient(90deg,#2dd4bf,#22c55e); padding:2px 5px; border-radius:4px;";
+    else if(v>=5) return "background:linear-gradient(90deg,#a3e635,#facc15); padding:2px 5px; border-radius:4px;";
+    else if(v>=4) return "background:linear-gradient(90deg,#facc15,#fb923c); padding:2px 5px; border-radius:4px;";
+    else if(v>=3) return "background:linear-gradient(90deg,#fb923c,#ff5a3c); padding:2px 5px; border-radius:4px;";
+    else if(v>=2) return "background:linear-gradient(90deg,#ff5a3c,#ff2a2a); padding:2px 5px; border-radius:4px;";
+    else if(v>=1) return "background:linear-gradient(90deg,#ff2a2a,#b30000); padding:2px 5px; border-radius:4px;";
+    else return "background:linear-gradient(90deg,#660000,#330000); padding:2px 5px; border-radius:4px;";
+}
+
+function saveRating(key,input){
+    savedRatings[key]=input.value;
+    localStorage.setItem("ratings", JSON.stringify(savedRatings));
+    applyColor(input);
+}
+
+function applyColor(input){
+    let v=parseFloat(input.value);
+    if(isNaN(v)){ input.style.background="#444"; return; }
+    input.style.background = getRatingStyle(v).replace("padding:2px 5px; border-radius:4px;","");
+}
+
+function closeModal(){
+    const modal=document.getElementById("albumModal");
+    modal.classList.remove("show");
+    setTimeout(()=>modal.style.display="none",300);
+}
+document.getElementById("albumModal").addEventListener("click",function(e){
+    if(e.target===this) closeModal();
+});
+
+renderAlbums();
+renderAdmin();
+</script>
+</body>
+</html>
